@@ -1,0 +1,24 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-node-debug2",
+        "esbenp.prettier-vscode",
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "ms-vscode.cpptools"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.claude.json,target=/home/node/.claude.json,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude/,target=/home/node/.claude/,type=bind,consistency=cached",
+    "source=node_modules,target=${containerWorkspaceFolder}/node_modules/,type=volume"
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=${containerWorkspaceFolder},type=bind,consistency=cached",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  }
+}

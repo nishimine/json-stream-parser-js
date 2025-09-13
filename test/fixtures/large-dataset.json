@@ -1,0 +1,74 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Alice Johnson",
+      "email": "alice@example.com",
+      "profile": {
+        "age": 28,
+        "city": "New York",
+        "preferences": {
+          "theme": "dark",
+          "language": "en",
+          "notifications": ["email", "push"]
+        }
+      },
+      "posts": [
+        {
+          "id": 101,
+          "title": "Getting started with JSON parsing",
+          "content": "Today I learned about streaming JSON parsers...",
+          "tags": ["json", "programming", "learning"],
+          "metrics": {
+            "views": 1250,
+            "likes": 89,
+            "shares": 12
+          }
+        },
+        {
+          "id": 102,
+          "title": "Advanced JsonPath filtering",
+          "content": "JsonPath expressions can be quite powerful...",
+          "tags": ["jsonpath", "filtering", "data"],
+          "metrics": {
+            "views": 890,
+            "likes": 67,
+            "shares": 8
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bob Smith",
+      "email": "bob@example.com",
+      "profile": {
+        "age": 35,
+        "city": "San Francisco",
+        "preferences": {
+          "theme": "light",
+          "language": "en",
+          "notifications": ["email"]
+        }
+      },
+      "posts": [
+        {
+          "id": 201,
+          "title": "Performance optimization tips",
+          "content": "Here are some ways to optimize your JSON processing...",
+          "tags": ["performance", "optimization", "tips"],
+          "metrics": {
+            "views": 2100,
+            "likes": 156,
+            "shares": 23
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "total_users": 2,
+    "generated_at": "2024-01-15T10:30:00Z",
+    "api_version": "v2.1.0"
+  }
+}

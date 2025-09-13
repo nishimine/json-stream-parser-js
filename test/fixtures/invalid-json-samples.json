@@ -1,0 +1,27 @@
+[
+  {
+    "name": "unterminated_string",
+    "data": "{\"key\": \"unterminated",
+    "expected_error": "Unterminated string"
+  },
+  {
+    "name": "invalid_number",
+    "data": "{\"number\": 123.}",
+    "expected_error": "Invalid number format"
+  },
+  {
+    "name": "trailing_comma",
+    "data": "{\"a\": 1, \"b\": 2,}",
+    "expected_error": "Unexpected character"
+  },
+  {
+    "name": "unescaped_control",
+    "data": "{\"text\": \"line\nbreak\"}",
+    "expected_error": "Unescaped control character"
+  },
+  {
+    "name": "invalid_unicode",
+    "data": "{\"unicode\": \"\\u12GH\"}",
+    "expected_error": "Invalid unicode escape"
+  }
+]
