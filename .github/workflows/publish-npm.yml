@@ -8,7 +8,10 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      deployments: write
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
