@@ -4,41 +4,60 @@
 
 json-stream-parser provides two main APIs for streaming JSON parsing:
 
-1. **`JsonTransformer`** - Modern Streams API-based transformer (Recommended)
+1. **`JsonTransformStream`** - Modern Streams API-based transformer (Recommended)
 2. **`JsonStreamParser`** - Legacy callback-based parser
 
-Both APIs emit only **primitive values** (string, number, boolean, null) with JsonPath location information. Objects and arrays themselves are not emitted.
+Both APIs emit values that match the specified JsonPath patterns with location information.
 
 ---
 
-## JsonTransformer
+## JsonTransformStream
 
-`JsonTransformer` is a `TransformStream` implementation that transforms `Uint8Array` chunks into structured JSON value results.
+`JsonTransformStream` is a `TransformStream` implementation that transforms `Uint8Array` chunks into structured JSON value results.
 
 ### Constructor
 
 ```javascript
-const transformer = new JsonTransformer(options);
+const transformer = new JsonTransformStream(options);
 ```
 
 #### Parameters
 
-- **`options`**: Object (optional)
-  - Currently no options are used
-  - Reserved for future extensions
+- **`options`**: Object (required)
+  - **`acceptableJsonPath`**: string[] (required)
+    - Array of JsonPath patterns to filter output values
+    - Uses **restricted JsonPath** implementation (wildcards only at pattern end, subset of RFC 9535)
+    - **Supported patterns**:
+      - **Exact match**: `'$.field'`, `'$.user.email'`
+      - **Object wildcard (end only)**: `'$.*'`, `'$.config.*'` - matches direct children only (1 level)
+      - **Array wildcard (end only)**: `'$[*]'`, `'$.users[*]'` - matches all array elements
+    - **Unsupported patterns** (use alternatives):
+      - ❌ Specific array index: `'$[0]'` → Use `'$[*]'` and filter in your app
+      - ❌ Mid-path wildcards: `'$.users[*].email'` → Use `'$.users[*]'` and access `.email` from results
+      - ❌ Recursive wildcard: `'$.**'`, `'$.**.id'` → Use specific paths or `'$.*'` and filter in your app
+    - Only values matching at least one pattern will be emitted
+    - **Examples**:
+      - `['$.users[*]']` - All user objects (access properties from each object)
+      - `['$.data.*']` - Direct children of data object (1 level only)
+      - `['$.*']` - All root-level properties
+      - `['$.config.database.*']` - All properties of config.database (1 level)
+    - See [JsonPath Filtering Specification](jsonpath-filtering.md) for details
 
 #### Return Value
 
-- Returns a `TransformStream<Uint8Array, JsonTransformerResult>`
+- Returns a `TransformStream<Uint8Array, JsonTransformStreamResult>`
 
 ### Usage
 
 #### Basic Usage
 
 ```javascript
-const { JsonTransformer } = require('json-stream-parser');
+const { JsonTransformStream } = require('@nishimine/json-stream-parser');
 
-const transformer = new JsonTransformer();
+// Specify which paths to extract
+const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.users[*]'] // Extract all user objects
+});
 
 // Connect with ReadableStream
 const resultStream = inputStream.pipeThrough(transformer);
@@ -48,22 +67,52 @@ const reader = resultStream.getReader();
 while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    console.log(value); // { path: '$.key', value: 'someValue' }
+    console.log(value); // { path: '$.users[0]', value: { name: 'Alice', email: '...' } }
+    // Access specific properties: value.value.name, value.value.email
 }
 ```
 
 #### With for-await-of
 
 ```javascript
-const { JsonTransformer } = require('json-stream-parser');
+const { JsonTransformStream } = require('@nishimine/json-stream-parser');
 
-const response = await fetch('https://api.example.com/data.json');
-const transformer = new JsonTransformer();
+const response = await fetch('https://api.example.com/users.json');
+
+// Extract all user objects
+const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.users[*]']
+});
 const resultStream = response.body.pipeThrough(transformer);
 
 for await (const { path, value } of resultStream) {
-    console.log(`${path}: ${value}`);
+    console.log(`${path}: ${value.email}`);
+    // Output: $.users[0]: alice@example.com
+    //         $.users[1]: bob@example.com
 }
+```
+
+#### Wildcard Pattern Examples
+
+```javascript
+// Extract all root-level properties (filter by path in your code)
+const transformer = new JsonTransformStream({ acceptableJsonPath: ['$.*'] });
+for await (const { path, value } of stream) {
+    if (path.endsWith('.id')) {
+        console.log(value); // Only id fields
+    }
+}
+
+// Extract all user objects
+new JsonTransformStream({ acceptableJsonPath: ['$.users[*]'] });
+
+// Extract multiple specific paths
+new JsonTransformStream({
+    acceptableJsonPath: ['$.name', '$.email', '$.age']
+});
+
+// Extract all root-level properties
+new JsonTransformStream({ acceptableJsonPath: ['$.*'] });
 ```
 
 ### Output Format
@@ -71,13 +120,11 @@ for await (const { path, value } of resultStream) {
 Each emitted value has the following structure:
 
 ```typescript
-interface JsonTransformerResult {
-    path: string;       // JsonPath format (e.g., '$.users[0].name')
-    value: JsonPrimitive; // string | number | boolean | null
+interface JsonTransformStreamResult {
+    path: string;   // JsonPath format (e.g., '$.users[0]', '$.name')
+    value: JsonValue; // any JSON value (primitive, object, or array)
 }
 ```
-
-**Important:** Only primitive values are emitted. Objects and arrays are not emitted as values.
 
 #### Example
 
@@ -106,46 +153,48 @@ Emitted values:
 
 ### Error Handling
 
-`JsonTransformer` throws standard JavaScript `Error` objects (not `JsonStreamParserError`) when parsing fails.
+`JsonTransformStream` throws `JsonStreamParserError` objects when parsing fails.
 
 ```javascript
 try {
-    const transformer = new JsonTransformer();
+    const transformer = new JsonTransformStream({ acceptableJsonPath: ['$.*'] });
     const resultStream = inputStream.pipeThrough(transformer);
 
     for await (const { path, value } of resultStream) {
         console.log(`${path}: ${value}`);
     }
 } catch (error) {
-    // Standard Error object
+    // JsonStreamParserError object
     console.error('Parsing failed:', error.message);
 }
 ```
 
 Common error messages:
-- `"Unexpected character at start of JSON: 'x'"`
-- `"Incomplete JSON data: empty or whitespace-only stream"`
-- `"Incomplete JSON data"`
-- `"Unexpected character after JSON: 'x'"`
+- `"Unexpected character '<char>' at start of JSON. Expected '{', '[', string, number, boolean, or null."`
+- `"Incomplete JSON data: The stream is empty or contains only whitespace. Expected a valid JSON value."`
+- `"Incomplete JSON data: The JSON structure is not complete. Check for missing closing brackets or braces."`
+- `"Unexpected character '<char>' after JSON. Only one top-level JSON value is allowed."`
 
 For detailed error handling information, see [Error Handling Specification](error-handling.md).
 
 ### TypeScript Support
 
 ```typescript
-import { JsonTransformer, JsonTransformerResult, JsonTransformerOptions } from 'json-stream-parser';
+import { JsonTransformStream, JsonTransformStreamResult, JsonTransformStreamOptions } from '@nishimine/json-stream-parser';
 
-const transformer = new JsonTransformer();
-// transformer is TransformStream<Uint8Array, JsonTransformerResult>
+const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.users[*]'] // Note: Wildcards only at pattern end
+});
+// transformer is TransformStream<Uint8Array, JsonTransformStreamResult>
 ```
 
 ---
 
 ## JsonStreamParser
 
-`JsonStreamParser` is a callback-based API that wraps `JsonTransformer` for simpler usage.
+`JsonStreamParser` is a callback-based API that provides a simple chunk-based interface using `enqueue()` method.
 
-**Note:** This is a legacy API. `JsonTransformer` is recommended for new code.
+**Note:** `JsonTransformStream` is recommended for new code using modern Streams API patterns.
 
 ### Constructor
 
@@ -155,12 +204,16 @@ const parser = new JsonStreamParser(options);
 
 #### Parameters
 
-- **`options`**: Object (optional)
-  - **`onValueParsed`**: `(path: string, value: JsonPrimitive) => void` (optional)
-    - Callback triggered when a value is parsed
-    - Called for ALL parsed values
+- **`options`**: Object (required)
+  - **`acceptableJsonPath`**: string[] (required)
+    - Array of JsonPath patterns to filter output values
+    - Same syntax as `JsonTransformStream`
+    - Only matching values are passed to `onValueParsed`
+  - **`onValueParsed`**: `(path: string, value: JsonValue) => void` (optional)
+    - Callback triggered when a matching value is parsed
+    - Called only for values matching `acceptableJsonPath` patterns
     - `path`: JsonPath string of the parsed value
-    - `value`: Parsed primitive value (string, number, boolean, null)
+    - `value`: Parsed value (any JSON value)
   - **`onError`**: `(error: JsonStreamParserError) => void` (optional)
     - Error callback function
     - If provided, errors are passed to this callback instead of being thrown
@@ -169,31 +222,50 @@ const parser = new JsonStreamParser(options);
 #### Example
 
 ```javascript
-const { JsonStreamParser } = require('json-stream-parser');
+const { JsonStreamParser } = require('@nishimine/json-stream-parser');
 
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.users[*]'],  // Required - extract all user objects
     onValueParsed: (path, value) => {
-        console.log(`${path}: ${value}`);
+        console.log(`${path}: ${value.email}`);
+        // Called for each user object - access .email property
     },
     onError: (error) => {
-        console.error(`Error at ${error.path}: ${error.message}`);
+        console.error(`Error: ${error.message}`);
     }
 });
 ```
 
 ### Methods
 
-#### `parseStream(readableStream)`
+#### `enqueue(chunk)`
 
-Process a ReadableStream containing JSON data.
+Process a chunk of JSON data.
 
 ```javascript
-await parser.parseStream(readableStream);
+await parser.enqueue(chunk);
 ```
 
 **Parameters:**
-- **`readableStream`**: `ReadableStream<Uint8Array>`
-  - The stream to parse
+- **`chunk`**: `Uint8Array`
+  - The chunk of JSON data to process
+
+**Return Value:**
+- Returns `Promise<void>`
+
+**Throws:**
+- Throws `JsonStreamParserError` if parsing fails and `onError` callback is not provided
+
+#### `close()`
+
+Close the parser and wait for final results.
+
+```javascript
+await parser.close();
+```
+
+**Parameters:**
+- None
 
 **Return Value:**
 - Returns `Promise<void>`
@@ -205,17 +277,25 @@ await parser.parseStream(readableStream);
 **Example:**
 
 ```javascript
-const { JsonStreamParser } = require('json-stream-parser');
+const { JsonStreamParser } = require('@nishimine/json-stream-parser');
 
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.users[*]'],
     onValueParsed: (path, value) => {
-        console.log(`${path}: ${value}`);
+        console.log(`${path}: ${value.email}`);
     }
 });
 
 try {
     const response = await fetch('https://api.example.com/data.json');
-    await parser.parseStream(response.body);
+    const reader = response.body.getReader();
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await parser.enqueue(value);
+    }
+    await parser.close();
 } catch (error) {
     // JsonStreamParserError if onError is not set
     console.error('Parsing failed:', error.message);
@@ -230,34 +310,47 @@ try {
 
 ```javascript
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.users[*]'],
     onValueParsed: (path, value) => {
-        console.log(`${path}: ${value}`);
+        console.log(`${path}: ${value.email}`);
     },
     onError: (error) => {
         // error is JsonStreamParserError instance
-        console.error(`Error [${error.type}] at ${error.path}:`, error.message);
-        console.error(`Position: ${error.position}`);
+        console.error(`Error: ${error.message}`);
     }
 });
 
-await parser.parseStream(stream); // Does not throw
+const reader = stream.getReader();
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value); // Does not throw
+}
+await parser.close(); // Does not throw
 ```
 
 #### Without Error Callback
 
 ```javascript
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.*'],  // Required parameter
     onValueParsed: (path, value) => {
         console.log(`${path}: ${value}`);
     }
 });
 
 try {
-    await parser.parseStream(stream);
+    const reader = stream.getReader();
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await parser.enqueue(value);
+    }
+    await parser.close();
 } catch (error) {
     // JsonStreamParserError is thrown
     if (error instanceof JsonStreamParserError) {
-        console.error('Parsing failed:', error.toJSON());
+        console.error('Parsing failed:', error.message);
     }
 }
 ```
@@ -267,11 +360,12 @@ For detailed information about `JsonStreamParserError`, see [JsonStreamParserErr
 ### TypeScript Support
 
 ```typescript
-import { JsonStreamParser, JsonStreamParserOptions, JsonStreamParserError } from 'json-stream-parser';
+import { JsonStreamParser, JsonStreamParserOptions, JsonStreamParserError, JsonValue } from '@nishimine/json-stream-parser';
 
 const parser = new JsonStreamParser({
-    onValueParsed: (path: string, value: string | number | boolean | null) => {
-        console.log(`${path}: ${value}`);
+    acceptableJsonPath: ['$.users[*]'],
+    onValueParsed: (path: string, value: JsonValue) => {
+        console.log(`${path}: ${JSON.stringify(value)}`);
     },
     onError: (error: JsonStreamParserError) => {
         console.error(error.message);
@@ -283,41 +377,24 @@ const parser = new JsonStreamParser({
 
 ## JsonStreamParserError
 
-Custom error class for JSON parsing errors in `JsonStreamParser`.
-
-**Note:** `JsonTransformer` does NOT use this error class. It throws standard `Error` objects.
+Custom error class for JSON parsing errors used by both `JsonTransformStream` and `JsonStreamParser`.
 
 For complete documentation, see [JsonStreamParserError Specification](jsonstream-parser-error.md).
 
 ### Quick Reference
 
 ```javascript
-const { JsonStreamParserError } = require('json-stream-parser');
+const { JsonStreamParserError } = require('@nishimine/json-stream-parser');
 
 // Constructor
-const error = new JsonStreamParserError(message, options);
-
-// Factory methods
-JsonStreamParserError.parse(message, position, path);
-JsonStreamParserError.structure(message, position, path);
-JsonStreamParserError.encoding(message, position);
-JsonStreamParserError.validation(message, position, path);
-JsonStreamParserError.from(error, options);
+const error = new JsonStreamParserError(message);
 ```
 
 ### Properties
 
-- **`name`**: `"JsonStreamParserError"` (string)
-- **`message`**: Error description (string)
-- **`type`**: Error type - `'PARSE'` | `'STRUCTURE'` | `'ENCODING'` | `'VALIDATION'` (string)
-- **`position`**: Byte position where error occurred (number)
-- **`path`**: JsonPath location where error occurred (string | null)
-- **`recoverable`**: Whether error can be recovered from (boolean) - currently always `false`
-
-### Methods
-
-- **`toJSON()`**: Returns plain object representation
-- **`toString()`**: Returns formatted error string
+- **`name`**: `"JsonStreamParserError"` (string) - Error class name
+- **`message`**: Error description (string) - Inherited from `Error`
+- **`stack`**: Stack trace (string) - Inherited from `Error`
 
 ---
 
@@ -342,6 +419,7 @@ You can filter values in your callback using string matching or regular expressi
 
 ```javascript
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.*'],  // Required: extract all root-level properties, then filter in callback
     onValueParsed: (path, value) => {
         // Filter by exact path
         if (path === '$.name') {
@@ -385,23 +463,23 @@ export interface JsonObject {
 export interface JsonArray extends Array<JsonValue> {}
 ```
 
-### JsonTransformer Types
+### JsonTransformStream Types
 
 ```typescript
-// Result emitted by JsonTransformer
-export interface JsonTransformerResult {
+// Result emitted by JsonTransformStream
+export interface JsonTransformStreamResult {
     path: string;
-    value: JsonPrimitive;
+    value: JsonValue; // Can be any JSON value (primitive, object, or array)
 }
 
-// Options for JsonTransformer
-export interface JsonTransformerOptions {
-    // Empty interface reserved for future options
+// Options for JsonTransformStream
+export interface JsonTransformStreamOptions {
+    acceptableJsonPath: string[]; // Required: Array of JsonPath patterns
 }
 
-// JsonTransformer class
-export class JsonTransformer extends TransformStream<Uint8Array, JsonTransformerResult> {
-    constructor(options?: JsonTransformerOptions);
+// JsonTransformStream class
+export class JsonTransformStream extends TransformStream<Uint8Array, JsonTransformStreamResult> {
+    constructor(options: JsonTransformStreamOptions);
 }
 ```
 
@@ -409,15 +487,16 @@ export class JsonTransformer extends TransformStream<Uint8Array, JsonTransformer
 
 ```typescript
 // Configuration options for JsonStreamParser
-export interface JsonStreamParserOptions extends JsonTransformerOptions {
-    onValueParsed?: (path: string, value: JsonPrimitive) => void;
+export interface JsonStreamParserOptions extends JsonTransformStreamOptions {
+    onValueParsed?: (path: string, value: JsonValue) => void;
     onError?: (error: JsonStreamParserError) => void;
 }
 
 // JsonStreamParser class
 export class JsonStreamParser {
-    constructor(options?: JsonStreamParserOptions);
-    parseStream(readableStream: ReadableStream<Uint8Array>): Promise<void>;
+    constructor(options: JsonStreamParserOptions);
+    enqueue(chunk: Uint8Array): Promise<void>;
+    close(): Promise<void>;
 }
 ```
 
@@ -426,38 +505,8 @@ export class JsonStreamParser {
 ```typescript
 export class JsonStreamParserError extends Error {
     readonly name: 'JsonStreamParserError';
-    readonly position: number;
-    readonly path: string | null;
-    readonly type: string;
-    readonly recoverable: boolean;
 
-    constructor(message: string, options?: {
-        position?: number;
-        path?: string | null;
-        type?: string;
-        recoverable?: boolean;
-    });
-
-    static parse(message: string, position?: number, path?: string | null): JsonStreamParserError;
-    static structure(message: string, position?: number, path?: string | null): JsonStreamParserError;
-    static encoding(message: string, position?: number): JsonStreamParserError;
-    static validation(message: string, position?: number, path?: string | null): JsonStreamParserError;
-    static from(error: Error, options?: {
-        type?: string;
-        position?: number;
-        path?: string | null;
-        recoverable?: boolean;
-    }): JsonStreamParserError;
-
-    toJSON(): {
-        name: string;
-        message: string;
-        position: number;
-        path: string | null;
-        type: string;
-        recoverable: boolean;
-    };
-    toString(): string;
+    constructor(message: string);
 }
 ```
 
@@ -486,10 +535,10 @@ Supports both CommonJS and ES Modules:
 
 ```javascript
 // CommonJS
-const { JsonTransformer, JsonStreamParser } = require('json-stream-parser');
+const { JsonTransformStream, JsonStreamParser } = require('@nishimine/json-stream-parser');
 
 // ES Modules
-import { JsonTransformer, JsonStreamParser } from 'json-stream-parser';
+import { JsonTransformStream, JsonStreamParser } from '@nishimine/json-stream-parser';
 ```
 
 ---
@@ -499,16 +548,17 @@ import { JsonTransformer, JsonStreamParser } from 'json-stream-parser';
 ### Example 1: Processing API Response
 
 ```javascript
-const { JsonTransformer } = require('json-stream-parser');
+const { JsonTransformStream } = require('@nishimine/json-stream-parser');
 
 const response = await fetch('https://api.example.com/users.json');
-const transformer = new JsonTransformer();
+const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.users[*]']
+});
 
 for await (const { path, value } of response.body.pipeThrough(transformer)) {
-    // Filter only user names
-    if (path.match(/^\$\.users\[\d+\]\.name$/)) {
-        console.log('User name:', value);
-    }
+    // Access user properties directly
+    console.log('User name:', value.name);
+    console.log('User email:', value.email);
 }
 ```
 
@@ -517,11 +567,12 @@ for await (const { path, value } of response.body.pipeThrough(transformer)) {
 ```javascript
 const fs = require('fs');
 const { Readable } = require('stream');
-const { JsonStreamParser } = require('json-stream-parser');
+const { JsonStreamParser } = require('@nishimine/json-stream-parser');
 
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.*'], // Extract all root-level properties
     onValueParsed: (path, value) => {
-        console.log(`${path}: ${value}`);
+        console.log(`${path}: ${JSON.stringify(value)}`);
     },
     onError: (error) => {
         console.error('Parse error:', error.message);
@@ -530,16 +581,24 @@ const parser = new JsonStreamParser({
 
 const fileStream = fs.createReadStream('large-file.json');
 const webStream = Readable.toWeb(fileStream);
+const reader = webStream.getReader();
 
-await parser.parseStream(webStream);
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value);
+}
+await parser.close();
 ```
 
 ### Example 3: Filtering Specific Values
 
 ```javascript
-const { JsonTransformer } = require('json-stream-parser');
+const { JsonTransformStream } = require('@nishimine/json-stream-parser');
 
-const transformer = new JsonTransformer();
+const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.*']
+});
 const reader = inputStream.pipeThrough(transformer).getReader();
 
 const prices = [];
@@ -560,25 +619,29 @@ console.log('Total:', prices.reduce((a, b) => a + b, 0));
 ### Example 4: Error Handling
 
 ```javascript
-const { JsonStreamParser, JsonStreamParserError } = require('json-stream-parser');
+const { JsonStreamParser, JsonStreamParserError } = require('@nishimine/json-stream-parser');
 
 const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.*'],
     onValueParsed: (path, value) => {
-        console.log(`${path}: ${value}`);
+        console.log(`${path}: ${JSON.stringify(value)}`);
     },
     onError: (error) => {
-        // Structured error information
+        // Error information
         console.error({
-            type: error.type,
-            message: error.message,
-            path: error.path,
-            position: error.position,
-            recoverable: error.recoverable
+            name: error.name,
+            message: error.message
         });
     }
 });
 
-await parser.parseStream(stream);
+const reader = stream.getReader();
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value);
+}
+await parser.close();
 ```
 
 ---

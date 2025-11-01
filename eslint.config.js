@@ -10,7 +10,7 @@ module.exports = [
             prettier: prettierPlugin,
         },
         languageOptions: {
-            ecmaVersion: 2020,
+            ecmaVersion: 2022,
             sourceType: 'commonjs',
             globals: {
                 ...globals.node,
@@ -39,7 +39,7 @@ module.exports = [
             'no-magic-numbers': [
                 'warn',
                 {
-                    ignore: [-1, 0, 1, 2, 10, 100, 1000, 1024],
+                    ignore: [-3, -2, -1, 0, 1, 2, 3, 10, 100, 1000, 1024],
                     ignoreArrayIndexes: true,
                     ignoreDefaultValues: true,
                 },
@@ -100,7 +100,7 @@ module.exports = [
             // テストファイルでは長い関数を許容
             'max-lines-per-function': [
                 'warn',
-                { max: 350, skipBlankLines: true, skipComments: true },
+                { max: 400, skipBlankLines: true, skipComments: true },
             ],
             // テストデータのマジックナンバーを許容
             'no-magic-numbers': 'off',

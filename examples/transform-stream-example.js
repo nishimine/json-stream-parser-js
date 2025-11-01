@@ -1,10 +1,10 @@
 /**
- * JsonTransformer & JsonStreamParser 使用例
+ * JsonTransformStream & JsonStreamParser 使用例
  *
  * ReadableStreamからJSONをパースし、コールバックでフィルタリングする例
  */
 
-const { JsonTransformer, JsonStreamParser } = require('../src/index.js');
+const { JsonTransformStream, JsonStreamParser } = require('../src/index.js');
 const { ReadableStream } = require('stream/web');
 
 // サンプルJSONデータ
@@ -20,9 +20,9 @@ const jsonData = JSON.stringify({
   }
 });
 
-// 例1: JsonTransformer - 基本的な使い方
+// 例1: JsonTransformStream - 基本的な使い方
 async function example1() {
-  console.log('\n=== 例1: JsonTransformer - 基本的な使い方 ===');
+  console.log('\n=== 例1: JsonTransformStream - 基本的な使い方 ===');
 
   // ReadableStreamを作成（実際にはfetch()等のレスポンスボディを使用）
   const stream = new ReadableStream({
@@ -39,8 +39,10 @@ async function example1() {
     }
   });
 
-  // JsonTransformerでパイプ
-  const transformer = new JsonTransformer();
+  // JsonTransformStreamでパイプ
+  const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.*'] // 必須: 抽出するパスを指定（すべてのルートレベルプロパティ）
+  });
   const resultStream = stream.pipeThrough(transformer);
 
   const reader = resultStream.getReader();
@@ -71,15 +73,22 @@ async function example2() {
 
   // ユーザー名のみをコールバックでフィルタリング
   const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.users[*]'], // 必須: ユーザーオブジェクト全体を取得
     onValueParsed: (path, value) => {
-      // 正規表現でユーザー名のパスにマッチ
-      if (path.match(/^\$\.users\[\d+\]\.name$/)) {
-        console.log(`ユーザー名: ${value}`);
+      // ユーザーオブジェクトからnameを抽出
+      if (path.match(/^\$\.users\[\d+\]$/)) {
+        console.log(`ユーザー名: ${value.name}`);
       }
     }
   });
 
-  await parser.parseStream(stream);
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value);
+  }
+  await parser.close();
 }
 
 // 例3: for-await-of構文での使用
@@ -94,14 +103,16 @@ async function example3() {
     }
   });
 
-  const transformer = new JsonTransformer();
+  const transformer = new JsonTransformStream({
+    acceptableJsonPath: ['$.users[*]'] // 必須: ユーザーオブジェクト全体を取得
+  });
   const resultStream = stream.pipeThrough(transformer);
 
   // for-await-of構文で簡潔に処理 & フィルタリング
   for await (const { path, value } of resultStream) {
-    // メールアドレスのみ表示
-    if (path.match(/^\$\.users\[\d+\]\.email$/)) {
-      console.log(`メールアドレス: ${value}`);
+    // ユーザーオブジェクトからメールアドレスを抽出
+    if (path.match(/^\$\.users\[\d+\]$/)) {
+      console.log(`メールアドレス: ${value.email}`);
     }
   }
 }
@@ -120,15 +131,26 @@ async function example4() {
 
   // ユーザー名とメタデータの合計値のみ抽出
   const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.users[*]', '$.metadata'], // 必須: ユーザーとメタデータを取得
     onValueParsed: (path, value) => {
-      // 複数パターンでマッチング
-      if (path.match(/^\$\.users\[\d+\]\.name$/) || path === '$.metadata.total') {
-        console.log(`${path}: ${value}`);
+      // ユーザーオブジェクトからnameを抽出
+      if (path.match(/^\$\.users\[\d+\]$/)) {
+        console.log(`${path}.name: ${value.name}`);
+      }
+      // メタデータオブジェクトからtotalを抽出
+      if (path === '$.metadata') {
+        console.log(`${path}.total: ${value.total}`);
       }
     }
   });
 
-  await parser.parseStream(stream);
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value);
+  }
+  await parser.close();
 }
 
 // 例5: データ収集とバッチ処理
@@ -146,14 +168,21 @@ async function example5() {
   // すべてのユーザーIDを収集
   const userIds = [];
   const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.users[*]'], // 必須: ユーザーオブジェクト全体を取得
     onValueParsed: (path, value) => {
-      if (path.match(/^\$\.users\[\d+\]\.id$/)) {
-        userIds.push(value);
+      if (path.match(/^\$\.users\[\d+\]$/)) {
+        userIds.push(value.id);
       }
     }
   });
 
-  await parser.parseStream(stream);
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value);
+  }
+  await parser.close();
 
   console.log('収集したユーザーID:', userIds);
   console.log('合計:', userIds.length, '件');
@@ -175,18 +204,23 @@ async function example6() {
 
   // onErrorコールバックでエラーをハンドリング
   const parser = new JsonStreamParser({
+    acceptableJsonPath: ['$.*'], // 必須: ルートレベルのプロパティを取得
     onValueParsed: (path, value) => {
-      console.log(`${path}: ${value}`);
+      console.log(`${path}: ${JSON.stringify(value)}`);
     },
     onError: (error) => {
       console.error('パースエラーが発生:');
       console.error('  メッセージ:', error.message);
-      console.error('  タイプ:', error.type);
-      console.error('  位置:', error.position);
     }
   });
 
-  await parser.parseStream(stream);
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await parser.enqueue(value);
+  }
+  await parser.close();
   console.log('エラーハンドリング完了（エラーコールバックで処理済み）');
 }
 

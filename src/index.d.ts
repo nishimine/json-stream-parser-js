@@ -25,76 +25,53 @@ export interface JsonArray extends Array<JsonValue> {}
  */
 export class JsonStreamParserError extends Error {
     readonly name: 'JsonStreamParserError';
-    readonly position: number;
-    readonly path: string | null;
-    readonly type: string;
-    readonly recoverable: boolean;
 
-    constructor(message: string, options?: {
-        position?: number;
-        path?: string | null;
-        type?: string;
-        recoverable?: boolean;
-    });
-
-    static parse(message: string, position?: number, path?: string | null): JsonStreamParserError;
-    static structure(message: string, position?: number, path?: string | null): JsonStreamParserError;
-    static encoding(message: string, position?: number): JsonStreamParserError;
-    static validation(message: string, position?: number, path?: string | null): JsonStreamParserError;
-    static from(error: Error, options?: {
-        type?: string;
-        position?: number;
-        path?: string | null;
-        recoverable?: boolean;
-    }): JsonStreamParserError;
-
-    toJSON(): {
-        name: string;
-        message: string;
-        position: number;
-        path: string | null;
-        type: string;
-        recoverable: boolean;
-    };
-    toString(): string;
+    constructor(message: string);
 }
 
 /**
- * Parsed result from JsonTransformer
- * Contains only primitive values (string, number, boolean, null)
+ * Parsed result from JsonTransformStream
+ * Contains any JSON value that matches the specified JsonPath patterns
  */
-export interface JsonTransformerResult {
+export interface JsonTransformStreamResult {
     path: string;
-    value: JsonPrimitive;
+    value: JsonValue;
 }
 
 /**
- * Options for JsonTransformer
- * Currently no options are used, but the interface is reserved for future extensions.
- * When adding options in the future, define them explicitly here instead of using index signatures.
+ * Options for JsonTransformStream
  */
-export interface JsonTransformerOptions {
-    // Empty interface reserved for future options
-    // Example future option: bufferSize?: number;
+export interface JsonTransformStreamOptions {
+    /**
+     * Array of JsonPath patterns to filter output values (required).
+     * Supports restricted JsonPath (wildcards only at path end - subset of RFC 9535).
+     * Must specify at least one pattern.
+     *
+     * @example
+     * ['$.users[*]'] // All user objects (access .email from each object)
+     * ['$.*'] // All root-level properties
+     * ['$.data.*'] // Direct children of data object (1 level only)
+     */
+    acceptableJsonPath: string[];
 }
 
 /**
- * JSON streaming transformer using Streams API
- * Extends TransformStream to convert Uint8Array chunks to JsonTransformerResult
- * Emits only primitive values (string, number, boolean, null)
+ * JSON streaming TransformStream using Streams API
+ * Extends TransformStream to convert Uint8Array chunks to JsonTransformStreamResult
+ * Emits values that match the specified JsonPath patterns
  */
-export class JsonTransformer extends TransformStream<Uint8Array, JsonTransformerResult> {
-    constructor(options?: JsonTransformerOptions);
+export class JsonTransformStream extends TransformStream<Uint8Array, JsonTransformStreamResult> {
+    constructor(options: JsonTransformStreamOptions);
 }
 
 /**
  * Configuration options for JsonStreamParser
  */
-export interface JsonStreamParserOptions extends JsonTransformerOptions {
+export interface JsonStreamParserOptions extends JsonTransformStreamOptions {
     /**
      * Callback function triggered when a value is parsed
      */
-    onValueParsed?: (path: string, value: JsonPrimitive) => void;
+    onValueParsed?: (path: string, value: JsonValue) => void;
 
     /**
      * Error callback function
@@ -103,13 +80,20 @@ export interface JsonStreamParserOptions extends JsonTransformerOptions {
 }
 
 /**
- * JSON streaming parser
+ * JSON streaming parser with callback-based interface
+ * Accepts Uint8Array chunks via enqueue() method
  */
 export class JsonStreamParser {
-    constructor(options?: JsonStreamParserOptions);
+    constructor(options: JsonStreamParserOptions);
 
     /**
-     * Process a ReadableStream containing JSON data
+     * Process a chunk of JSON data
+     * @param chunk Uint8Array chunk containing JSON data
      */
-    parseStream(readableStream: ReadableStream<Uint8Array>): Promise<void>;
+    enqueue(chunk: Uint8Array): Promise<void>;
+
+    /**
+     * Close the parser and wait for final results
+     */
+    close(): Promise<void>;
 }

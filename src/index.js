@@ -5,10 +5,10 @@
 
 const { JsonStreamParser } = require('./json-stream-parser.js');
 const { JsonStreamParserError } = require('./json-stream-parser-error.js');
-const { JsonTransformer } = require('./json-transformer.js');
+const { JsonTransformStream } = require('./json-transform-stream.js');
 
 module.exports = {
     JsonStreamParser,
     JsonStreamParserError,
-    JsonTransformer,
+    JsonTransformStream,
 };
